@@ -1,0 +1,43 @@
+name: Growth Review (daily, Phase 2 stub)
+
+on:
+  schedule:
+    - cron: "0 18 * * *"  # ~23:30 IST, after the day's posting is done
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: reboot-director
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - run: pip install -r requirements.txt
+
+      - name: Run Director (growth-review)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+        run: python -m src.director --mode growth-review --dry-run
+
+      - name: Commit state.db
+        run: |
+          git config user.name "reboot-india-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add data/state.db
+          git diff --cached --quiet || git commit -m "chore: update state.db [growth-review run]"
+          git push

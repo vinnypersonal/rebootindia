@@ -1,0 +1,11 @@
+# Core accountability handles — named explicitly in CLAUDE.md, safe to hardcode.
+core:
+  always_tag: "@TheDeshBhakt"
+  central_level_tag: "@narendramodi"   # only appended when task.level == "Central"
+
+# Ministry/office handles are sourced from data/domains.yaml (ministry_handle field),
+# kept blank until independently verified — see note in domains.yaml.
+# This file is for any additional opposition/media handles the CEO wants rotated in.
+# Never auto-populate this list with guessed handles.
+opposition: []
+media: []

@@ -1,0 +1,88 @@
+# National domains (Tier 1) — guaranteed 2x/day each, priority=high, level=Central.
+# ministry_handle is intentionally left blank where not independently verified.
+# Reviewer Pass A requires this field be present-but-empty rather than a guessed handle
+# (CLAUDE.md §6). CEO/ops: fill in verified official handles before going live.
+domains:
+  - id: education
+    name: Education
+    priority: high
+    level: Central
+    keywords: ["education ministry india", "school education india", "higher education india", "NEP india"]
+    ministry_handle: ""
+
+  - id: healthcare
+    name: Healthcare
+    priority: high
+    level: Central
+    keywords: ["health ministry india", "hospital india", "public health india", "ayushman bharat"]
+    ministry_handle: ""
+
+  - id: infrastructure
+    name: Infrastructure
+    priority: high
+    level: Central
+    keywords: ["infrastructure india", "highway project india", "railway india delay", "road ministry india"]
+    ministry_handle: ""
+
+  - id: unemployment
+    name: Unemployment
+    priority: high
+    level: Central
+    keywords: ["unemployment india", "jobs india", "labour ministry india", "employment scheme india"]
+    ministry_handle: ""
+
+  - id: farmers
+    name: Farmers
+    priority: high
+    level: Central
+    keywords: ["farmers india", "agriculture ministry india", "MSP india", "crop insurance india"]
+    ministry_handle: ""
+
+  - id: corruption
+    name: Corruption
+    priority: high
+    level: Central
+    keywords: ["corruption india scam", "CBI investigation india", "CVC india", "scam india crores"]
+    ministry_handle: ""
+
+  - id: pollution
+    name: Pollution
+    priority: high
+    level: Central
+    keywords: ["pollution india", "air quality india", "environment ministry india", "river pollution india"]
+    ministry_handle: ""
+
+  - id: women_safety
+    name: Women Safety
+    priority: high
+    level: Central
+    keywords: ["women safety india", "crime against women india", "women ministry india"]
+    ministry_handle: ""
+
+  - id: economy
+    name: Economy
+    priority: high
+    level: Central
+    keywords: ["indian economy", "finance ministry india", "inflation india", "GDP india"]
+    ministry_handle: ""
+
+  - id: judiciary
+    name: Judiciary
+    priority: high
+    level: Central
+    keywords: ["judiciary india", "court pendency india", "law ministry india", "supreme court india"]
+    ministry_handle: ""
+
+  - id: energy
+    name: Energy
+    priority: high
+    level: Central
+    keywords: ["power ministry india", "energy india", "electricity india shortage", "coal india"]
+    ministry_handle: ""
+
+  - id: digital_india
+    name: Digital India
+    priority: high
+    level: Central
+    keywords: ["digital india", "IT ministry india", "aadhaar issue india", "digital infrastructure india"]
+    ministry_handle: ""
