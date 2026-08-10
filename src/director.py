@@ -6,7 +6,7 @@ Modes (one per GitHub Actions cron, §5):
   new-problems   every 3h  — national domain cadence + city rotation fill
   trend-scan     hourly    — Trend Scout only (posting still gated by caps)
   follow-ups     daily     — chase problems whose 7-day followup is due
-  growth-review  daily     — Phase 2 stub, see growth.py
+  growth-review  daily     — T13: engagement read-back + domain/city weighting, see growth.py
 """
 import argparse
 import datetime as dt
@@ -39,8 +39,15 @@ def _satire_allowed(conn):
 
 
 def enqueue_national_tasks(conn):
+    """All 12 national domains get enqueued every run — cadence is guaranteed
+    (§7). T13 weights only reorder them, so when the daily cap is tight,
+    higher-resonance domains claim their processing slot first (claim_next_tasks
+    breaks priority ties on insertion order)."""
+    weights = store.get_weights(conn, "domain")
+    domains = sorted(config.load_domains(), key=lambda d: weights.get(d["id"], 1.0), reverse=True)
+
     inserted = 0
-    for domain in config.load_domains():
+    for domain in domains:
         articles = news_gdelt.discover_for_domain(domain, max_records=3)
         if not articles:
             store.log(conn, None, "director", f"no articles found for domain {domain['id']}", level="warn")
@@ -56,29 +63,63 @@ def enqueue_national_tasks(conn):
     return inserted
 
 
-def _todays_city_slice(cities, slice_size=8):
-    """Round-robin the city pool by day-of-year so the whole pool cycles
-    through in ~1-2 weeks, not daily (§7)."""
+def _city_key(city):
+    return f"{city['name']}, {city['state']}"
+
+
+def _weighted_city_pool(cities, weights):
+    """Replicates each city in proportion to its weight (clamped) so
+    higher-resonance cities surface more often across the rotation while
+    every city still gets at least one slot per cycle (§7's "full coverage
+    in 1-2 weeks" guarantee is unaffected — this only shifts frequency
+    within that cycle, never drops a city)."""
+    if not weights:
+        return list(cities)
+    pool = []
+    for city in cities:
+        w = max(config.GROWTH_WEIGHT_MIN, min(config.GROWTH_WEIGHT_MAX, weights.get(_city_key(city), 1.0)))
+        reps = max(1, round(w * 2))
+        pool.extend([city] * reps)
+    return pool
+
+
+def _todays_city_slice(cities, slice_size=8, weights=None):
+    """Round-robin the (possibly weight-expanded) city pool by day-of-year so
+    the whole pool cycles through in ~1-2 weeks, not daily (§7). De-dupes so
+    a single day's slice never lists the same city twice even when the pool
+    contains repeats from weighting."""
     if not cities:
         return []
+    pool = _weighted_city_pool(cities, weights)
     day_index = dt.date.today().timetuple().tm_yday
-    start = (day_index * slice_size) % len(cities)
-    ordered = cities[start:] + cities[:start]
-    return ordered[:slice_size]
+    start = (day_index * slice_size) % len(pool)
+    ordered = pool[start:] + pool[:start]
+
+    picked, seen = [], set()
+    for city in ordered:
+        key = _city_key(city)
+        if key in seen:
+            continue
+        seen.add(key)
+        picked.append(city)
+        if len(picked) >= slice_size:
+            break
+    return picked
 
 
 def enqueue_city_tasks(conn, remaining_budget):
     if remaining_budget <= 0:
         return 0
     cities = config.load_cities()
+    weights = store.get_weights(conn, "city")
     inserted = 0
-    for city in _todays_city_slice(cities, slice_size=remaining_budget):
+    for city in _todays_city_slice(cities, slice_size=remaining_budget, weights=weights):
         articles = news_gdelt.discover_for_city(city["name"], city["state"], max_records=3)
         if not articles:
             continue
         article = articles[0]
         task_id = store.enqueue_task(
-            conn, kind="city", city=f"{city['name']}, {city['state']}", priority="low",
+            conn, kind="city", city=_city_key(city), priority="low",
             source_url=article["url"], article=article,
         )
         if task_id:

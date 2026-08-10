@@ -63,21 +63,26 @@ dry-run to live. Leave it unset until the CEO signs off (`CLAUDE.md` §12).
 
 ## Status vs. `CLAUDE.md` v2 backlog (§11)
 
-Built (T1–T12): repo scaffold, config/domains/cities/handles, SQLite store, GDELT + Google
+Built (T1–T13): repo scaffold, config/domains/cities/handles, SQLite store, GDELT + Google
 News RSS discovery, Google Trends + GDELT-spike Trend Scout, Model Router (Gemini → Groq →
 Cerebras → Mistral failover), 4-persona Worker, 2-pass Reviewer, X/Facebook/Instagram
 posters, Director orchestration with `--dry-run`, follow-up flow that re-fetches fresh news
 and re-runs the full pipeline with the original post attached as context (a status check, not
-a repeat report), the 4 GitHub Actions crons, and a unit test suite (27 tests,
-`python -m unittest discover -s tests`).
+a repeat report), the Growth Tracker (reads back likes/shares/comments and turns them into
+domain/city weight multipliers that nudge future selection order/frequency — never a gate:
+national cadence stays guaranteed and every city still cycles through rotation regardless of
+weight), the 5 GitHub Actions workflows (4 crons + a `tests.yml` CI check), and a unit test
+suite (42 tests, `python -m unittest discover -s tests`).
 
 Not yet built, on purpose:
 - **T4b** — X's actual current free-tier write cap has not been probed live (no X credentials
   in this environment). `config.DAILY_CAMPAIGN_CAP` defaults to 40 per the doc; **re-verify
   against X's real cap before going live** and lower the config value to match if needed.
-- **T13** (`growth.py`) — Phase 2 engagement read-back is a stub by design (CLAUDE.md marks
-  it Phase 2). It logs and exits; it does not yet bias domain/city selection.
 - **T14** — no rebootindia.com publish hook yet.
+
+Also unconfirmed: whether X/Meta's free tiers actually allow reading back engagement metrics
+(§9 flags this explicitly) — `growth.py`'s fetchers degrade to "no signal" on any failure, so
+a locked-down read tier just means weights stay at the neutral default (1.0), not a crash.
 
 ## Decisions still pending CEO sign-off (`CLAUDE.md` §12)
 

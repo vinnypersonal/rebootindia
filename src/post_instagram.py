@@ -51,3 +51,28 @@ def post(caption, image_url, ready, dry_run=True):
         return False, None, f"publish error {publish_resp.status_code}: {publish_resp.text[:300]}"
 
     return True, publish_resp.json().get("id"), "posted"
+
+
+def fetch_metrics(media_id):
+    """Returns {'likes','shares','comments'} or None on any failure. Instagram
+    Graph API has no share count for standard media, so 'shares' is always 0
+    here — not a missing-data signal, a metric the platform doesn't expose."""
+    token = os.environ.get("IG_ACCESS_TOKEN")
+    if not token:
+        return None
+
+    try:
+        resp = requests.get(
+            f"https://graph.facebook.com/{GRAPH_VERSION}/{media_id}",
+            params={"fields": "like_count,comments_count", "access_token": token},
+            timeout=REQUEST_TIMEOUT,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return {
+            "likes": data.get("like_count", 0),
+            "shares": 0,
+            "comments": data.get("comments_count", 0),
+        }
+    except requests.RequestException:
+        return None

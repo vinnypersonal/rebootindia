@@ -1,5 +1,6 @@
 import time
 import unittest
+import unittest.mock
 from pathlib import Path
 
 from src import director, store
@@ -31,6 +32,64 @@ class DirectorSelectionTests(unittest.TestCase):
     def test_satire_allowed_true_with_no_posts_yet(self):
         with store.connect(self.db_path) as conn:
             self.assertTrue(director._satire_allowed(conn))
+
+
+class GrowthWeightingTests(unittest.TestCase):
+    def setUp(self):
+        self.db_path = Path(f"/tmp/reboot_test_weighting_{time.time_ns()}.db")
+        store.init_db(self.db_path)
+
+    def tearDown(self):
+        if self.db_path.exists():
+            self.db_path.unlink()
+
+    def test_no_weights_pool_equals_original_list(self):
+        cities = [{"name": "A", "state": "S"}, {"name": "B", "state": "S"}]
+        self.assertEqual(director._weighted_city_pool(cities, weights=None), cities)
+        self.assertEqual(director._weighted_city_pool(cities, weights={}), cities)
+
+    def test_weighted_city_appears_more_often_across_rotation(self):
+        cities = [{"name": f"City{i}", "state": "S"} for i in range(6)]
+        weights = {director._city_key(cities[0]): 2.0}  # max weight for City0, rest default 1.0
+
+        appearances = 0
+        total_days = 30
+        for day in range(total_days):
+            with unittest.mock.patch("src.director.dt") as mock_dt:
+                mock_dt.date.today.return_value.timetuple.return_value.tm_yday = day
+                sl = director._todays_city_slice(cities, slice_size=2, weights=weights)
+            if director._city_key(cities[0]) in [director._city_key(c) for c in sl]:
+                appearances += 1
+
+        baseline_share = 2 / 6  # slice_size / pool size, if unweighted
+        self.assertGreater(appearances / total_days, baseline_share,
+                            "a 2x-weighted city should be selected more often than its unweighted share")
+
+    def test_daily_slice_never_repeats_a_city_even_when_pool_has_duplicates(self):
+        cities = [{"name": "A", "state": "S"}, {"name": "B", "state": "S"}]
+        weights = {"A, S": 2.0}
+        sl = director._todays_city_slice(cities, slice_size=2, weights=weights)
+        keys = [director._city_key(c) for c in sl]
+        self.assertEqual(len(keys), len(set(keys)), "no city should appear twice in one day's slice")
+
+    def test_national_domains_enqueued_highest_weight_first(self):
+        fake_domains = [
+            {"id": "low", "name": "Low", "keywords": ["low kw"]},
+            {"id": "high", "name": "High", "keywords": ["high kw"]},
+        ]
+        attempted_order = []
+
+        def fake_discover(domain, max_records=3):
+            attempted_order.append(domain["id"])
+            return []  # no articles -> nothing enqueued, we only care about order
+
+        with store.connect(self.db_path) as conn:
+            store.set_weight(conn, "domain", "high", 2.0)
+            with unittest.mock.patch("src.director.config.load_domains", return_value=fake_domains), \
+                 unittest.mock.patch("src.director.news_gdelt.discover_for_domain", side_effect=fake_discover):
+                director.enqueue_national_tasks(conn)
+
+        self.assertEqual(attempted_order, ["high", "low"])
 
 
 class FollowupContextTests(unittest.TestCase):

@@ -71,6 +71,29 @@ CREATE TABLE IF NOT EXISTS followups (
     status TEXT NOT NULL DEFAULT 'pending',  -- 'pending'|'done'|'skipped'
     created_at REAL NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS engagement (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    post_id INTEGER NOT NULL,
+    platform TEXT NOT NULL,
+    likes INTEGER NOT NULL DEFAULT 0,
+    shares INTEGER NOT NULL DEFAULT 0,   -- retweets+quotes (X) / shares (FB) / 0 (IG, no share metric)
+    comments INTEGER NOT NULL DEFAULT 0,
+    fetched_at REAL NOT NULL
+);
+
+-- Domain/city priority multipliers computed by growth.py (T13, Phase 2).
+-- A nudge only: national domains keep their guaranteed cadence (§7) regardless
+-- of weight, and every city still cycles through rotation (§7) regardless of
+-- weight — weight only affects order/frequency, never inclusion.
+CREATE TABLE IF NOT EXISTS weights (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scope TEXT NOT NULL,    -- 'domain' | 'city'
+    key TEXT NOT NULL,
+    weight REAL NOT NULL DEFAULT 1.0,
+    updated_at REAL NOT NULL,
+    UNIQUE(scope, key)
+);
 """
 
 
@@ -235,3 +258,69 @@ def daily_satire_count(conn, since_hours=24):
         (time.time() - since_hours * 3600,),
     ).fetchone()
     return row["c"]
+
+
+# --- T13: engagement read-back + growth weighting -------------------------
+
+def posts_for_engagement_refresh(conn, since_days=14):
+    """Posted, platform-confirmed posts within the lookback window — the
+    candidate set growth.py re-checks engagement for on each run."""
+    rows = conn.execute(
+        "SELECT * FROM posts WHERE posted=1 AND platform_post_id IS NOT NULL AND posted_at > ?",
+        (time.time() - since_days * 86400,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def record_engagement(conn, post_id, platform, likes=0, shares=0, comments=0):
+    conn.execute(
+        "INSERT INTO engagement (post_id, platform, likes, shares, comments, fetched_at) "
+        "VALUES (?,?,?,?,?,?)",
+        (post_id, platform, likes, shares, comments, time.time()),
+    )
+
+
+def _latest_engagement_scores_by(conn, group_column, not_null_clause, since_days):
+    """Shared aggregation for domain/city engagement scoring: joins each
+    task's posts to that post's MOST RECENT engagement snapshot, scores as
+    likes + 2*shares + comments, and averages per group. Returns
+    (scores: {key: avg_score}, counts: {key: n_posts})."""
+    rows = conn.execute(f"""
+        SELECT t.{group_column} AS key,
+               AVG(latest.likes + 2 * latest.shares + latest.comments) AS score,
+               COUNT(*) AS n
+        FROM tasks t
+        JOIN posts p ON p.task_id = t.id
+        JOIN (
+            SELECT e1.post_id, e1.likes, e1.shares, e1.comments
+            FROM engagement e1
+            JOIN (SELECT post_id, MAX(fetched_at) AS mx FROM engagement GROUP BY post_id) e2
+              ON e1.post_id = e2.post_id AND e1.fetched_at = e2.mx
+        ) latest ON latest.post_id = p.id
+        WHERE t.{group_column} IS NOT NULL AND {not_null_clause} AND t.finished_at > ?
+        GROUP BY t.{group_column}
+    """, (time.time() - since_days * 86400,)).fetchall()
+    scores = {r["key"]: r["score"] for r in rows}
+    counts = {r["key"]: r["n"] for r in rows}
+    return scores, counts
+
+
+def domain_engagement_scores(conn, since_days=30):
+    return _latest_engagement_scores_by(conn, "domain_id", "t.domain_id IS NOT NULL", since_days)
+
+
+def city_engagement_scores(conn, since_days=30):
+    return _latest_engagement_scores_by(conn, "city", "t.city IS NOT NULL", since_days)
+
+
+def set_weight(conn, scope, key, weight):
+    conn.execute(
+        """INSERT INTO weights (scope, key, weight, updated_at) VALUES (?,?,?,?)
+           ON CONFLICT(scope, key) DO UPDATE SET weight=excluded.weight, updated_at=excluded.updated_at""",
+        (scope, key, weight, time.time()),
+    )
+
+
+def get_weights(conn, scope):
+    rows = conn.execute("SELECT key, weight FROM weights WHERE scope=?", (scope,)).fetchall()
+    return {r["key"]: r["weight"] for r in rows}

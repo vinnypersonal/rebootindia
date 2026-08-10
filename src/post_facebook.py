@@ -32,3 +32,31 @@ def post(text, dry_run=True):
 
     data = resp.json()
     return True, data.get("id"), "posted"
+
+
+def fetch_metrics(post_id):
+    """Returns {'likes','shares','comments'} or None on any failure (missing
+    token, API error, permission denied, etc). Growth Tracker treats None as
+    no signal, never a crash."""
+    token = os.environ.get("FB_PAGE_ACCESS_TOKEN")
+    if not token:
+        return None
+
+    try:
+        resp = requests.get(
+            f"https://graph.facebook.com/{GRAPH_VERSION}/{post_id}",
+            params={
+                "fields": "likes.summary(true),comments.summary(true),shares",
+                "access_token": token,
+            },
+            timeout=REQUEST_TIMEOUT,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return {
+            "likes": data.get("likes", {}).get("summary", {}).get("total_count", 0),
+            "shares": data.get("shares", {}).get("count", 0),
+            "comments": data.get("comments", {}).get("summary", {}).get("total_count", 0),
+        }
+    except requests.RequestException:
+        return None

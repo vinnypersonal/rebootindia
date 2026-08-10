@@ -23,6 +23,15 @@ SATIRE_MAX_RATIO = float(os.environ.get("REBOOT_SATIRE_RATIO", 0.20))  # Decisio
 MAX_HASHTAGS = 3
 IST_PEAK_WINDOWS = [(8, 10), (13, 14), (19, 22)]  # (start_hour, end_hour), IST, 24h clock
 
+# --- T13: Phase 2 engagement weighting (growth.py) --------------------------
+# A nudge, not a gate: national domain cadence (§7) and full city rotation
+# coverage are never reduced by weight — only order/frequency shift.
+GROWTH_ENGAGEMENT_LOOKBACK_DAYS = 14   # how far back to keep re-checking posted metrics
+GROWTH_SCORE_LOOKBACK_DAYS = 30        # how far back counts toward a weight
+GROWTH_MIN_SAMPLE_SIZE = 3             # fewer posted campaigns than this -> stay at weight 1.0
+GROWTH_WEIGHT_MIN = 0.5
+GROWTH_WEIGHT_MAX = 2.0
+
 # --- Platform limits ---------------------------------------------------------
 TWITTER_CHAR_LIMIT = 280
 

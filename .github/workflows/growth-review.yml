@@ -1,4 +1,4 @@
-name: Growth Review (daily, Phase 2 stub)
+name: Growth Review (daily, T13)
 
 on:
   schedule:
@@ -32,6 +32,15 @@ jobs:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
           MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          X_API_KEY: ${{ secrets.X_API_KEY }}
+          X_API_SECRET: ${{ secrets.X_API_SECRET }}
+          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+          X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
+          FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+        # growth-review only reads engagement + writes weights, it never posts —
+        # --dry-run here is just belt-and-suspenders, director.run_growth_review
+        # doesn't call any poster.
         run: python -m src.director --mode growth-review --dry-run
 
       - name: Commit state.db
