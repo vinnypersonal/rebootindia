@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     source_url TEXT,
     article_json TEXT,
     trend_keyword TEXT,
+    followup_of_task_id INTEGER,       -- set only when kind='followup' (T10)
     created_at REAL NOT NULL,
     claimed_at REAL,
     finished_at REAL,
@@ -103,20 +104,32 @@ def log(conn, task_id, stage, message, level="info", llm_provider=None):
 
 
 def enqueue_task(conn, kind, domain_id=None, city=None, priority="normal",
-                  source_url=None, article=None, trend_keyword=None):
+                  source_url=None, article=None, trend_keyword=None,
+                  followup_of_task_id=None):
     """Insert a new task. Returns the row id, or None if it's a dedup no-op
     (same source_url+kind already queued/processed — idempotency, CLAUDE.md §10)."""
     try:
         cur = conn.execute(
             """INSERT INTO tasks (kind, domain_id, city, priority, source_url,
-                                   article_json, trend_keyword, created_at)
-               VALUES (?,?,?,?,?,?,?,?)""",
+                                   article_json, trend_keyword, followup_of_task_id, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
             (kind, domain_id, city, priority, source_url,
-             json.dumps(article) if article else None, trend_keyword, time.time()),
+             json.dumps(article) if article else None, trend_keyword,
+             followup_of_task_id, time.time()),
         )
         return cur.lastrowid
     except sqlite3.IntegrityError:
         return None
+
+
+def get_task(conn, task_id):
+    row = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def get_posts_for_task(conn, task_id):
+    rows = conn.execute("SELECT * FROM posts WHERE task_id=?", (task_id,)).fetchall()
+    return [dict(r) for r in rows]
 
 
 def claim_next_tasks(conn, kind=None, limit=1):

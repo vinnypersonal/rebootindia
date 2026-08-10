@@ -63,18 +63,18 @@ dry-run to live. Leave it unset until the CEO signs off (`CLAUDE.md` §12).
 
 ## Status vs. `CLAUDE.md` v2 backlog (§11)
 
-Built (T1–T9, T11, T12): repo scaffold, config/domains/cities/handles, SQLite store,
-GDELT + Google News RSS discovery, Google Trends + GDELT-spike Trend Scout, Model Router
-(Gemini → Groq → Cerebras → Mistral failover), 4-persona Worker, 2-pass Reviewer,
-X/Facebook/Instagram posters, Director orchestration with `--dry-run`, the 4 GitHub Actions
-crons, and a unit test suite (23 tests, `python -m unittest discover -s tests`).
+Built (T1–T12): repo scaffold, config/domains/cities/handles, SQLite store, GDELT + Google
+News RSS discovery, Google Trends + GDELT-spike Trend Scout, Model Router (Gemini → Groq →
+Cerebras → Mistral failover), 4-persona Worker, 2-pass Reviewer, X/Facebook/Instagram
+posters, Director orchestration with `--dry-run`, follow-up flow that re-fetches fresh news
+and re-runs the full pipeline with the original post attached as context (a status check, not
+a repeat report), the 4 GitHub Actions crons, and a unit test suite (27 tests,
+`python -m unittest discover -s tests`).
 
 Not yet built, on purpose:
 - **T4b** — X's actual current free-tier write cap has not been probed live (no X credentials
   in this environment). `config.DAILY_CAMPAIGN_CAP` defaults to 40 per the doc; **re-verify
   against X's real cap before going live** and lower the config value to match if needed.
-- **T10** — Follow-up flow currently marks due follow-ups `done` without re-running the
-  pipeline against fresh news; wire that comparison in before relying on it.
 - **T13** (`growth.py`) — Phase 2 engagement read-back is a stub by design (CLAUDE.md marks
   it Phase 2). It logs and exits; it does not yet bias domain/city selection.
 - **T14** — no rebootindia.com publish hook yet.

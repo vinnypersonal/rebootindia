@@ -10,6 +10,7 @@ Modes (one per GitHub Actions cron, §5):
 """
 import argparse
 import datetime as dt
+import time
 
 from . import config, model_router, news_gdelt, post_facebook, post_instagram, post_twitter
 from . import reviewer as reviewer_mod
@@ -93,13 +94,45 @@ def _article_from_task(task):
     return json.loads(task["article_json"]) if task["article_json"] else {}
 
 
+def _build_followup_context(conn, task):
+    """For kind='followup' tasks: pulls the original task's posted text +
+    source so the Worker writes a status update, not a fresh report."""
+    if not task.get("followup_of_task_id"):
+        return None
+    original = store.get_task(conn, task["followup_of_task_id"])
+    if not original:
+        return None
+
+    posts = store.get_posts_for_task(conn, original["id"])
+    original_text = next(
+        (p["text"] for p in posts if p["platform"] == "twitter" and p["text"]),
+        next((p["text"] for p in posts if p["text"]), None),
+    )
+    if not original_text:
+        return None
+
+    days_since = None
+    if original.get("finished_at"):
+        days_since = round((time.time() - original["finished_at"]) / 86400, 1)
+
+    return {
+        "original_post_text": original_text,
+        "original_source_url": original.get("source_url", ""),
+        "days_since": days_since if days_since is not None else "?",
+    }
+
+
 def process_task(conn, task, dry_run=True):
     """Runs one task through Worker -> Reviewer (with one retry) -> Poster."""
     domain = None
     if task["domain_id"]:
         domain = next((d for d in config.load_domains() if d["id"] == task["domain_id"]), None)
-    level = "Central" if task["kind"] in ("national", "trend") and domain else \
-            ("District" if task["kind"] == "city" else "Central")
+    if domain:
+        level = "Central"
+    elif task["city"]:
+        level = "District"
+    else:
+        level = "Central"
     ministry_handle = domain.get("ministry_handle", "") if domain else ""
 
     article = _article_from_task(task)
@@ -112,11 +145,17 @@ def process_task(conn, task, dry_run=True):
         return
 
     satire_allowed = _satire_allowed(conn)
+    followup_context = _build_followup_context(conn, task) if task["kind"] == "followup" else None
+    if task["kind"] == "followup" and not followup_context:
+        store.log(conn, task["id"], "director",
+                  "followup task has no original post text to reference, dropping", level="warn")
+        store.finish_task(conn, task["id"], status="skipped")
+        return
 
     try:
         draft, provider = worker.run(
             conn, task, article, domain, level, task["city"], task["trend_keyword"],
-            ministry_handle, satire_allowed,
+            ministry_handle, satire_allowed, followup_context=followup_context,
         )
     except (worker.WorkerError, model_router.AllProvidersExhausted) as exc:
         store.log(conn, task["id"], "director", f"worker failed: {exc}", level="error")
@@ -135,6 +174,7 @@ def process_task(conn, task, dry_run=True):
             draft, provider = worker.run(
                 conn, task, article, domain, level, task["city"], task["trend_keyword"],
                 ministry_handle, satire_allowed, retry_issues=result.issues,
+                followup_context=followup_context,
             )
         except (worker.WorkerError, model_router.AllProvidersExhausted) as exc:
             store.log(conn, task["id"], "director", f"worker retry failed: {exc}", level="error")
@@ -214,12 +254,56 @@ def run_trend_scan(conn, dry_run=True):
 
 
 def run_follow_ups(conn, dry_run=True):
+    """Re-runs the full pipeline for each due followup against FRESH news on
+    the same domain/city/keyword, with the original post attached as context
+    (§3, T10) — this is a status check, not a repeat of the original report."""
     due = store.due_followups(conn)
     store.log(conn, None, "director", f"{len(due)} followup(s) due")
+
+    enqueued = 0
     for fu in due:
-        # Follow-up campaigns re-run the same domain/city through the full
-        # pipeline against fresh news, comparing status to the original task.
+        original = store.get_task(conn, fu["original_task_id"])
+        if not original:
+            conn.execute("UPDATE followups SET status='skipped' WHERE id=?", (fu["id"],))
+            continue
+
+        domain = next((d for d in config.load_domains() if d["id"] == original["domain_id"]), None) \
+            if original["domain_id"] else None
+
+        if domain:
+            articles = news_gdelt.discover_for_domain(domain, max_records=1)
+        elif original["city"]:
+            city_name, _, state = original["city"].partition(", ")
+            articles = news_gdelt.discover_for_city(city_name, state, max_records=1)
+        elif original["trend_keyword"]:
+            articles = news_gdelt.discover(original["trend_keyword"], max_records=1)
+        else:
+            articles = []
+
         conn.execute("UPDATE followups SET status='done' WHERE id=?", (fu["id"],))
+
+        if not articles:
+            store.log(conn, original["id"], "director",
+                      "followup: no fresh article found, nothing to check", level="warn")
+            continue
+
+        task_id = store.enqueue_task(
+            conn, kind="followup", domain_id=original["domain_id"], city=original["city"],
+            priority="normal", source_url=articles[0]["url"], article=articles[0],
+            trend_keyword=original["trend_keyword"], followup_of_task_id=original["id"],
+        )
+        if task_id:
+            enqueued += 1
+
+    processed = 0
+    while _under_daily_cap(conn):
+        tasks = store.claim_next_tasks(conn, kind="followup", limit=1)
+        if not tasks:
+            break
+        process_task(conn, tasks[0], dry_run=dry_run)
+        processed += 1
+
+    store.log(conn, None, "director", f"followups: {enqueued} enqueued, {processed} processed")
 
 
 def run_growth_review(conn, dry_run=True):
