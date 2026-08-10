@@ -46,6 +46,23 @@ python -m src.director --mode trend-scan --dry-run   # safe: no posting keys req
 full generate-and-review pipeline but never calls a posting API — this is the default until
 the CEO explicitly flips it live.
 
+## T4b: confirming X's real free-tier write cap
+
+X has no read-only "how many posts do I have left" endpoint — the only reliable signal is the
+rate-limit headers X returns on an actual write call. `src/probe_x_limits.py` posts one
+short, obviously-a-probe tweet, reads those headers back, and deletes the tweet immediately.
+
+This is a real (if brief) write to the connected account, so it's a human-run, opt-in step —
+not part of any workflow, and not something Claude Code runs on its own:
+
+```bash
+python -m src.probe_x_limits --yes   # requires live X_API_KEY/SECRET/ACCESS_TOKEN/SECRET
+```
+
+It prints the `x-app-limit-*`/`x-user-limit-*` headers X returns and reminds you to lower
+`REBOOT_DAILY_CAMPAIGN_CAP` (repo secret/variable) if the real cap is under the current
+default of 40. Re-run periodically — these free-tier numbers move without notice (§3a).
+
 ## Required GitHub Actions Secrets (only needed for live posting / live LLM calls)
 
 | Secret | Used for |

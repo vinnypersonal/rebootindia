@@ -317,8 +317,11 @@ Satire is allowed and can be effective for reach, with rules:
       fallback) + RSS fallback.
 - [ ] **T4b** Probe X API's actual current free-tier write cap; write the number into
       `config.py` as the binding daily ceiling; report it back before going live.
-      *(not done — no X credentials available in the build environment; `DAILY_CAMPAIGN_CAP`
-      still defaults to 40, unverified against X's real cap)*
+      *(tooling built — `src/probe_x_limits.py`, posts+immediately-deletes one throwaway
+      tweet and reads back the rate-limit headers, gated behind an explicit `--yes` flag
+      since it's a real (if brief) write to the account. Not yet run — no X credentials
+      available in the build environment. `DAILY_CAMPAIGN_CAP` still defaults to 40,
+      unverified against X's real cap; a human with live creds needs to run it, per README.)*
 - [x] **T5** `trend_scout.py` — Google Trends India RSS + GDELT volume-spike scorer; inserts
       deduped HIGH-priority tasks. *(Trends RSS URL above had moved to `/trending/rss` —
       fixed and verified live during the build; the old `/trends/trendingsearches/daily/rss`
