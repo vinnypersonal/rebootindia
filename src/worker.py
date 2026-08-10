@@ -53,7 +53,7 @@ def validate_draft(draft):
 
 
 def run(conn, task, article, domain, level, city, trend_keyword,
-        ministry_handle, satire_allowed, retry_issues=None):
+        ministry_handle, satire_allowed, retry_issues=None, followup_context=None):
     """Generates (and validates) one campaign draft for `task`. Returns the
     draft dict plus the provider that served it. Raises WorkerError /
     model_router.AllProvidersExhausted on unrecoverable failure — caller is
@@ -73,6 +73,7 @@ def run(conn, task, article, domain, level, city, trend_keyword,
         central_handle=central_handle,
         satire_allowed=satire_allowed,
         retry_issues=retry_issues,
+        followup_context=followup_context,
     )
 
     raw_text, provider = model_router.call_llm(

@@ -34,6 +34,15 @@ Run these four personas internally, in order, then emit ONE final JSON object:
    scheme/mechanism that addresses the named problem. Not vague ("do better") — specific
    (a scheme name, a policy lever, an oversight mechanism).
 
+FOLLOW-UP RULE (only relevant if FOLLOWUP CONTEXT is supplied below): this is a status check
+on a problem RebootIndia already reported. Read the follow-up context, then read the new
+source article and determine, using ONLY what the new article supports: resolved, partially
+addressed, unchanged, or worsened. Write the post as an update ("RebootIndia flagged this on
+[topic] — here's what's changed / what hasn't") — do not present the original problem as if
+it were newly discovered. If the new article gives no real signal either way, set "ready":
+false with "readyReason" explaining there is nothing new to report — a followup with no
+actual update is not worth posting.
+
 SATIRE RULES (only relevant if satire_allowed=true was passed in):
 - Only use satire if you can set "satire": true AND "factAnchor" to the exact verified
   fact/number the satire is built on. No factAnchor, no satire — write it straight instead.
@@ -100,6 +109,7 @@ Trending hashtag to consider (if any, else "N/A"): {trend_keyword}
 Satire permitted for this run: {satire_allowed}
 Core handle to include (always): {core_handle}
 Central-level handle to include if level=Central: {central_handle}
+{followup_block}
 {retry_block}
 Write the campaign now, following the system instructions exactly."""
 
@@ -110,12 +120,28 @@ Fix these specific issues in this attempt. If a claim can't be fixed to be sourc
 drop that claim/platform rather than repeating the problem.
 """
 
+FOLLOWUP_CONTEXT_TEMPLATE = """
+FOLLOWUP CONTEXT — this is a status check, not a new report:
+Originally reported ({days_since} days ago): {original_post_text}
+Original source: {original_source_url}
+Apply the FOLLOW-UP RULE from the system instructions.
+"""
+
 
 def build_messages(article, domain, level, city, trend_keyword, ministry_handle,
-                    core_handle, central_handle, satire_allowed, retry_issues=None):
+                    core_handle, central_handle, satire_allowed, retry_issues=None,
+                    followup_context=None):
     retry_block = ""
     if retry_issues:
         retry_block = RETRY_FEEDBACK_TEMPLATE.format(issues="\n".join(f"- {i}" for i in retry_issues))
+
+    followup_block = ""
+    if followup_context:
+        followup_block = FOLLOWUP_CONTEXT_TEMPLATE.format(
+            days_since=followup_context.get("days_since", "?"),
+            original_post_text=followup_context.get("original_post_text", ""),
+            original_source_url=followup_context.get("original_source_url", ""),
+        )
 
     user_content = USER_TEMPLATE.format(
         title=article.get("title") or "",
@@ -130,6 +156,7 @@ def build_messages(article, domain, level, city, trend_keyword, ministry_handle,
         satire_allowed=str(bool(satire_allowed)).lower(),
         core_handle=core_handle,
         central_handle=central_handle,
+        followup_block=followup_block,
         retry_block=retry_block,
     )
     return [

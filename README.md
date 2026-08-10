@@ -46,6 +46,23 @@ python -m src.director --mode trend-scan --dry-run   # safe: no posting keys req
 full generate-and-review pipeline but never calls a posting API — this is the default until
 the CEO explicitly flips it live.
 
+## T4b: confirming X's real free-tier write cap
+
+X has no read-only "how many posts do I have left" endpoint — the only reliable signal is the
+rate-limit headers X returns on an actual write call. `src/probe_x_limits.py` posts one
+short, obviously-a-probe tweet, reads those headers back, and deletes the tweet immediately.
+
+This is a real (if brief) write to the connected account, so it's a human-run, opt-in step —
+not part of any workflow, and not something Claude Code runs on its own:
+
+```bash
+python -m src.probe_x_limits --yes   # requires live X_API_KEY/SECRET/ACCESS_TOKEN/SECRET
+```
+
+It prints the `x-app-limit-*`/`x-user-limit-*` headers X returns and reminds you to lower
+`REBOOT_DAILY_CAMPAIGN_CAP` (repo secret/variable) if the real cap is under the current
+default of 40. Re-run periodically — these free-tier numbers move without notice (§3a).
+
 ## Required GitHub Actions Secrets (only needed for live posting / live LLM calls)
 
 | Secret | Used for |
@@ -57,27 +74,50 @@ the CEO explicitly flips it live.
 | `X_API_KEY`, `X_API_SECRET`, `X_ACCESS_TOKEN`, `X_ACCESS_SECRET` | X/Twitter posting (OAuth1.0a user context) |
 | `FB_PAGE_ID`, `FB_PAGE_ACCESS_TOKEN` | Facebook Page posting |
 | `IG_USER_ID`, `IG_ACCESS_TOKEN` | Instagram posting (Business/Creator account linked to the Page) |
+| `WEBSITE_PUBLISH_URL` | T14: rebootindia.com publish endpoint (see below) |
+| `WEBSITE_PUBLISH_API_KEY` | optional — sent as `Authorization: Bearer <key>` |
 
 Repo variable `REBOOT_LIVE_POSTING=true` switches the 3h/hourly/daily workflows from
 dry-run to live. Leave it unset until the CEO signs off (`CLAUDE.md` §12).
 
+## T14: publishing to rebootindia.com
+
+The exact CMS/backend rebootindia.com runs on wasn't known at build time, so `src/publish_website.py`
+targets a generic, documented JSON contract instead of a specific platform's API shape (see the
+module docstring for the full schema). Point `WEBSITE_PUBLISH_URL` at whatever endpoint receives
+that contract — a thin adapter on the site's backend, a serverless function, a CMS webhook receiver
+— and this module doesn't need to change. If rebootindia.com turns out to run on a specific CMS
+later (WordPress/Strapi/Contentful/etc.), swap the `requests.post` call for that platform's client;
+`build_payload()`'s contract can stay the same.
+
+Like the social posters, it degrades gracefully: no `WEBSITE_PUBLISH_URL` configured means the
+website publish step is skipped and logged, never a reason to fail the campaign.
+
 ## Status vs. `CLAUDE.md` v2 backlog (§11)
 
-Built (T1–T9, T11, T12): repo scaffold, config/domains/cities/handles, SQLite store,
-GDELT + Google News RSS discovery, Google Trends + GDELT-spike Trend Scout, Model Router
-(Gemini → Groq → Cerebras → Mistral failover), 4-persona Worker, 2-pass Reviewer,
-X/Facebook/Instagram posters, Director orchestration with `--dry-run`, the 4 GitHub Actions
-crons, and a unit test suite (23 tests, `python -m unittest discover -s tests`).
+Built (T1–T14): repo scaffold, config/domains/cities/handles, SQLite store, GDELT + Google
+News RSS discovery, Google Trends + GDELT-spike Trend Scout, Model Router (Gemini → Groq →
+Cerebras → Mistral failover), 4-persona Worker, 2-pass Reviewer, X/Facebook/Instagram
+posters, Director orchestration with `--dry-run`, follow-up flow that re-fetches fresh news
+and re-runs the full pipeline with the original post attached as context (a status check, not
+a repeat report), the Growth Tracker (reads back likes/shares/comments and turns them into
+domain/city weight multipliers that nudge future selection order/frequency — never a gate:
+national cadence stays guaranteed and every city still cycles through rotation regardless of
+weight), the website publish hook (a generic, documented REST contract — see above), the 5
+GitHub Actions workflows (4 crons + a `tests.yml` CI check), and a unit test suite (53 tests,
+`python -m unittest discover -s tests`).
 
 Not yet built, on purpose:
-- **T4b** — X's actual current free-tier write cap has not been probed live (no X credentials
-  in this environment). `config.DAILY_CAMPAIGN_CAP` defaults to 40 per the doc; **re-verify
-  against X's real cap before going live** and lower the config value to match if needed.
-- **T10** — Follow-up flow currently marks due follow-ups `done` without re-running the
-  pipeline against fresh news; wire that comparison in before relying on it.
-- **T13** (`growth.py`) — Phase 2 engagement read-back is a stub by design (CLAUDE.md marks
-  it Phase 2). It logs and exits; it does not yet bias domain/city selection.
-- **T14** — no rebootindia.com publish hook yet.
+- **T4b** — tooling exists (`src/probe_x_limits.py`), but it hasn't actually been run: X's
+  real free-tier write cap is still unconfirmed (no X credentials in this environment).
+  `config.DAILY_CAMPAIGN_CAP` defaults to 40 per the doc; **re-verify against X's real cap
+  before going live** and lower the config value to match if needed.
+- **T14**'s publish hook is code-complete but untested against a real endpoint — nobody has
+  confirmed what rebootindia.com's backend actually is yet (see the T14 section above).
+
+Also unconfirmed: whether X/Meta's free tiers actually allow reading back engagement metrics
+(§9 flags this explicitly) — `growth.py`'s fetchers degrade to "no signal" on any failure, so
+a locked-down read tier just means weights stay at the neutral default (1.0), not a crash.
 
 ## Decisions still pending CEO sign-off (`CLAUDE.md` §12)
 

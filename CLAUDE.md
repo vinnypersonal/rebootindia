@@ -308,33 +308,54 @@ Satire is allowed and can be effective for reach, with rules:
 
 ## 11. Build Backlog v2 (execute in order)
 
-- [ ] **T1** Scaffold repo (confirm public visibility for free Actions minutes); `requirements.txt`, `.gitignore`, README.
-- [ ] **T2** `config.py` + `domains.yaml` (12 national domains, priority=high) + `cities.yaml`
+- [x] **T1** Scaffold repo (confirm public visibility for free Actions minutes); `requirements.txt`, `.gitignore`, README.
+      *(built; repo visibility itself is still a CEO decision, §12 #1)*
+- [x] **T2** `config.py` + `domains.yaml` (12 national domains, priority=high) + `cities.yaml`
       (seed ~50–100 priority districts) + `handles.yaml`.
-- [ ] **T3** `store.py` — SQLite schema (tasks, logs, trends) + init + seed loader.
-- [ ] **T4** `news_gdelt.py` — GDELT query + image extraction (`socialimage` + og:image
+- [x] **T3** `store.py` — SQLite schema (tasks, logs, trends) + init + seed loader.
+- [x] **T4** `news_gdelt.py` — GDELT query + image extraction (`socialimage` + og:image
       fallback) + RSS fallback.
 - [ ] **T4b** Probe X API's actual current free-tier write cap; write the number into
       `config.py` as the binding daily ceiling; report it back before going live.
-- [ ] **T5** `trend_scout.py` — Google Trends India RSS + GDELT volume-spike scorer; inserts
-      deduped HIGH-priority tasks.
-- [ ] **T5b** `model_router.py` — OpenAI-compatible adapter for Gemini/Groq/Cerebras/Mistral;
-      priority-ordered failover; logs which provider served each call. Build and unit-test
-      this before T6/T7 so Worker and Reviewer both consume it from day one, not bolted on
-      later.
-- [ ] **T6** `prompt_worker.py` + `worker.py` — 4-persona call **via model_router**, marker
+      *(tooling built — `src/probe_x_limits.py`, posts+immediately-deletes one throwaway
+      tweet and reads back the rate-limit headers, gated behind an explicit `--yes` flag
+      since it's a real (if brief) write to the account. Not yet run — no X credentials
+      available in the build environment. `DAILY_CAMPAIGN_CAP` still defaults to 40,
+      unverified against X's real cap; a human with live creds needs to run it, per README.)*
+- [x] **T5** `trend_scout.py` — Google Trends India RSS + GDELT volume-spike scorer; inserts
+      deduped HIGH-priority tasks. *(Trends RSS URL above had moved to `/trending/rss` —
+      fixed and verified live during the build; the old `/trends/trendingsearches/daily/rss`
+      path 404s.)*
+- [x] **T5b** `model_router.py` — OpenAI-compatible adapter for Gemini/Groq/Cerebras/Mistral;
+      priority-ordered failover; logs which provider served each call.
+- [x] **T6** `prompt_worker.py` + `worker.py` — 4-persona call **via model_router**, marker
       extraction, schema validation, satire/factAnchor enforcement.
-- [ ] **T7** `prompt_reviewer.py` + `reviewer.py` — Pass A (deterministic) + Pass B (second
+- [x] **T7** `prompt_reviewer.py` + `reviewer.py` — Pass A (deterministic) + Pass B (second
       call **via model_router**) + retry-once logic.
-- [ ] **T8** `post_twitter.py` + `post_facebook.py` + `post_instagram.py` — graceful
+- [x] **T8** `post_twitter.py` + `post_facebook.py` + `post_instagram.py` — graceful
       per-platform skip on `ready=false`.
-- [ ] **T9** `director.py` — full flow wired: Trend Scout → News → Worker → Reviewer →
+- [x] **T9** `director.py` — full flow wired: Trend Scout → News → Worker → Reviewer →
       Poster → Logger; `--dry-run` mode (generate + review, never post).
-- [ ] **T10** Follow-up flow (compare new GDELT status to original problem; write update).
-- [ ] **T11** GitHub Actions workflows (4 crons per §5) + Secrets wiring; commit `state.db`.
-- [ ] **T12** Tests: director selection, extraction, char-limit, idempotency, Reviewer bounce/retry.
-- [ ] **T13** (Phase 2) `growth.py` — engagement read-back, priority weighting.
-- [ ] **T14** (later) Website hook: publish each approved campaign to rebootindia.com.
+- [x] **T10** Follow-up flow: re-fetches fresh news per due followup and re-runs the pipeline
+      with the original post attached as context, so the Worker writes a status update
+      (resolved/partial/unchanged/worsened) rather than repeating the original report.
+- [x] **T11** GitHub Actions workflows (4 crons per §5) + Secrets wiring; commit `state.db`.
+      *(plus a 5th, `tests.yml`, running the unit suite on every PR/push to `main`.)*
+- [x] **T12** Tests: director selection, extraction, char-limit, idempotency, Reviewer bounce/retry.
+      *(42 tests, `python -m unittest discover -s tests`.)*
+- [x] **T13** `growth.py` — reads back likes/shares/comments per posted campaign, scores
+      domain/city average engagement, and persists clamped weight multipliers
+      (`GROWTH_WEIGHT_MIN`–`GROWTH_WEIGHT_MAX`) that `director.py` uses to reorder national
+      domains and bias city-rotation frequency — a nudge only, never a gate: national cadence
+      stays guaranteed and every city still cycles through rotation regardless of weight.
+      Groups under `GROWTH_MIN_SAMPLE_SIZE` posted campaigns stay unweighted rather than
+      being scored on noise. Read-endpoint availability on free tiers is still unconfirmed
+      (§9) — every fetch degrades to "no signal" on failure instead of raising.
+- [x] **T14** Website hook: `publish_website.py` POSTs each Reviewer-approved campaign to
+      `WEBSITE_PUBLISH_URL`. The exact CMS rebootindia.com runs on wasn't specified when this
+      was built, so it targets a generic, documented JSON contract (see the module docstring
+      and README) rather than a specific platform's API shape — untested against a real
+      endpoint until the site's actual backend is confirmed.
 
 Always dry-run until CEO explicitly approves live posting. Dry-run needs no live posting
 keys — only read/verification calls if we choose to test those early.

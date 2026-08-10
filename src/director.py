@@ -6,12 +6,14 @@ Modes (one per GitHub Actions cron, §5):
   new-problems   every 3h  — national domain cadence + city rotation fill
   trend-scan     hourly    — Trend Scout only (posting still gated by caps)
   follow-ups     daily     — chase problems whose 7-day followup is due
-  growth-review  daily     — Phase 2 stub, see growth.py
+  growth-review  daily     — T13: engagement read-back + domain/city weighting, see growth.py
 """
 import argparse
 import datetime as dt
+import time
 
 from . import config, model_router, news_gdelt, post_facebook, post_instagram, post_twitter
+from . import publish_website
 from . import reviewer as reviewer_mod
 from . import store, trend_scout, worker
 
@@ -38,8 +40,15 @@ def _satire_allowed(conn):
 
 
 def enqueue_national_tasks(conn):
+    """All 12 national domains get enqueued every run — cadence is guaranteed
+    (§7). T13 weights only reorder them, so when the daily cap is tight,
+    higher-resonance domains claim their processing slot first (claim_next_tasks
+    breaks priority ties on insertion order)."""
+    weights = store.get_weights(conn, "domain")
+    domains = sorted(config.load_domains(), key=lambda d: weights.get(d["id"], 1.0), reverse=True)
+
     inserted = 0
-    for domain in config.load_domains():
+    for domain in domains:
         articles = news_gdelt.discover_for_domain(domain, max_records=3)
         if not articles:
             store.log(conn, None, "director", f"no articles found for domain {domain['id']}", level="warn")
@@ -55,29 +64,63 @@ def enqueue_national_tasks(conn):
     return inserted
 
 
-def _todays_city_slice(cities, slice_size=8):
-    """Round-robin the city pool by day-of-year so the whole pool cycles
-    through in ~1-2 weeks, not daily (§7)."""
+def _city_key(city):
+    return f"{city['name']}, {city['state']}"
+
+
+def _weighted_city_pool(cities, weights):
+    """Replicates each city in proportion to its weight (clamped) so
+    higher-resonance cities surface more often across the rotation while
+    every city still gets at least one slot per cycle (§7's "full coverage
+    in 1-2 weeks" guarantee is unaffected — this only shifts frequency
+    within that cycle, never drops a city)."""
+    if not weights:
+        return list(cities)
+    pool = []
+    for city in cities:
+        w = max(config.GROWTH_WEIGHT_MIN, min(config.GROWTH_WEIGHT_MAX, weights.get(_city_key(city), 1.0)))
+        reps = max(1, round(w * 2))
+        pool.extend([city] * reps)
+    return pool
+
+
+def _todays_city_slice(cities, slice_size=8, weights=None):
+    """Round-robin the (possibly weight-expanded) city pool by day-of-year so
+    the whole pool cycles through in ~1-2 weeks, not daily (§7). De-dupes so
+    a single day's slice never lists the same city twice even when the pool
+    contains repeats from weighting."""
     if not cities:
         return []
+    pool = _weighted_city_pool(cities, weights)
     day_index = dt.date.today().timetuple().tm_yday
-    start = (day_index * slice_size) % len(cities)
-    ordered = cities[start:] + cities[:start]
-    return ordered[:slice_size]
+    start = (day_index * slice_size) % len(pool)
+    ordered = pool[start:] + pool[:start]
+
+    picked, seen = [], set()
+    for city in ordered:
+        key = _city_key(city)
+        if key in seen:
+            continue
+        seen.add(key)
+        picked.append(city)
+        if len(picked) >= slice_size:
+            break
+    return picked
 
 
 def enqueue_city_tasks(conn, remaining_budget):
     if remaining_budget <= 0:
         return 0
     cities = config.load_cities()
+    weights = store.get_weights(conn, "city")
     inserted = 0
-    for city in _todays_city_slice(cities, slice_size=remaining_budget):
+    for city in _todays_city_slice(cities, slice_size=remaining_budget, weights=weights):
         articles = news_gdelt.discover_for_city(city["name"], city["state"], max_records=3)
         if not articles:
             continue
         article = articles[0]
         task_id = store.enqueue_task(
-            conn, kind="city", city=f"{city['name']}, {city['state']}", priority="low",
+            conn, kind="city", city=_city_key(city), priority="low",
             source_url=article["url"], article=article,
         )
         if task_id:
@@ -93,13 +136,45 @@ def _article_from_task(task):
     return json.loads(task["article_json"]) if task["article_json"] else {}
 
 
+def _build_followup_context(conn, task):
+    """For kind='followup' tasks: pulls the original task's posted text +
+    source so the Worker writes a status update, not a fresh report."""
+    if not task.get("followup_of_task_id"):
+        return None
+    original = store.get_task(conn, task["followup_of_task_id"])
+    if not original:
+        return None
+
+    posts = store.get_posts_for_task(conn, original["id"])
+    original_text = next(
+        (p["text"] for p in posts if p["platform"] == "twitter" and p["text"]),
+        next((p["text"] for p in posts if p["text"]), None),
+    )
+    if not original_text:
+        return None
+
+    days_since = None
+    if original.get("finished_at"):
+        days_since = round((time.time() - original["finished_at"]) / 86400, 1)
+
+    return {
+        "original_post_text": original_text,
+        "original_source_url": original.get("source_url", ""),
+        "days_since": days_since if days_since is not None else "?",
+    }
+
+
 def process_task(conn, task, dry_run=True):
     """Runs one task through Worker -> Reviewer (with one retry) -> Poster."""
     domain = None
     if task["domain_id"]:
         domain = next((d for d in config.load_domains() if d["id"] == task["domain_id"]), None)
-    level = "Central" if task["kind"] in ("national", "trend") and domain else \
-            ("District" if task["kind"] == "city" else "Central")
+    if domain:
+        level = "Central"
+    elif task["city"]:
+        level = "District"
+    else:
+        level = "Central"
     ministry_handle = domain.get("ministry_handle", "") if domain else ""
 
     article = _article_from_task(task)
@@ -112,11 +187,17 @@ def process_task(conn, task, dry_run=True):
         return
 
     satire_allowed = _satire_allowed(conn)
+    followup_context = _build_followup_context(conn, task) if task["kind"] == "followup" else None
+    if task["kind"] == "followup" and not followup_context:
+        store.log(conn, task["id"], "director",
+                  "followup task has no original post text to reference, dropping", level="warn")
+        store.finish_task(conn, task["id"], status="skipped")
+        return
 
     try:
         draft, provider = worker.run(
             conn, task, article, domain, level, task["city"], task["trend_keyword"],
-            ministry_handle, satire_allowed,
+            ministry_handle, satire_allowed, followup_context=followup_context,
         )
     except (worker.WorkerError, model_router.AllProvidersExhausted) as exc:
         store.log(conn, task["id"], "director", f"worker failed: {exc}", level="error")
@@ -135,6 +216,7 @@ def process_task(conn, task, dry_run=True):
             draft, provider = worker.run(
                 conn, task, article, domain, level, task["city"], task["trend_keyword"],
                 ministry_handle, satire_allowed, retry_issues=result.issues,
+                followup_context=followup_context,
             )
         except (worker.WorkerError, model_router.AllProvidersExhausted) as exc:
             store.log(conn, task["id"], "director", f"worker retry failed: {exc}", level="error")
@@ -186,6 +268,17 @@ def _post_approved_draft(conn, task, draft, dry_run=True):
     if posted:
         store.mark_posted(conn, pid, platform_id)
 
+    # Website (T14): rebootindia.com's own record of the campaign, independent
+    # of individual social platforms' ready flags — this is additive, never a
+    # reason to fail the campaign if WEBSITE_PUBLISH_URL isn't configured.
+    payload = publish_website.build_payload(task, draft)
+    pid = store.record_post(conn, task["id"], "website", (draft.get("problem") or "")[:280],
+                             ready=True, satire=satire)
+    published, remote_id, detail = publish_website.publish(payload, dry_run=dry_run)
+    store.log(conn, task["id"], "poster", f"website: {detail}")
+    if published:
+        store.mark_posted(conn, pid, remote_id)
+
 
 def run_new_problems(conn, dry_run=True):
     enqueue_national_tasks(conn)
@@ -214,12 +307,56 @@ def run_trend_scan(conn, dry_run=True):
 
 
 def run_follow_ups(conn, dry_run=True):
+    """Re-runs the full pipeline for each due followup against FRESH news on
+    the same domain/city/keyword, with the original post attached as context
+    (§3, T10) — this is a status check, not a repeat of the original report."""
     due = store.due_followups(conn)
     store.log(conn, None, "director", f"{len(due)} followup(s) due")
+
+    enqueued = 0
     for fu in due:
-        # Follow-up campaigns re-run the same domain/city through the full
-        # pipeline against fresh news, comparing status to the original task.
+        original = store.get_task(conn, fu["original_task_id"])
+        if not original:
+            conn.execute("UPDATE followups SET status='skipped' WHERE id=?", (fu["id"],))
+            continue
+
+        domain = next((d for d in config.load_domains() if d["id"] == original["domain_id"]), None) \
+            if original["domain_id"] else None
+
+        if domain:
+            articles = news_gdelt.discover_for_domain(domain, max_records=1)
+        elif original["city"]:
+            city_name, _, state = original["city"].partition(", ")
+            articles = news_gdelt.discover_for_city(city_name, state, max_records=1)
+        elif original["trend_keyword"]:
+            articles = news_gdelt.discover(original["trend_keyword"], max_records=1)
+        else:
+            articles = []
+
         conn.execute("UPDATE followups SET status='done' WHERE id=?", (fu["id"],))
+
+        if not articles:
+            store.log(conn, original["id"], "director",
+                      "followup: no fresh article found, nothing to check", level="warn")
+            continue
+
+        task_id = store.enqueue_task(
+            conn, kind="followup", domain_id=original["domain_id"], city=original["city"],
+            priority="normal", source_url=articles[0]["url"], article=articles[0],
+            trend_keyword=original["trend_keyword"], followup_of_task_id=original["id"],
+        )
+        if task_id:
+            enqueued += 1
+
+    processed = 0
+    while _under_daily_cap(conn):
+        tasks = store.claim_next_tasks(conn, kind="followup", limit=1)
+        if not tasks:
+            break
+        process_task(conn, tasks[0], dry_run=dry_run)
+        processed += 1
+
+    store.log(conn, None, "director", f"followups: {enqueued} enqueued, {processed} processed")
 
 
 def run_growth_review(conn, dry_run=True):
