@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS trends (
 CREATE TABLE IF NOT EXISTS posts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     task_id INTEGER NOT NULL,
-    platform TEXT NOT NULL,           -- 'twitter'|'facebook'|'instagram'
+    platform TEXT NOT NULL,           -- 'twitter'|'facebook'|'instagram'|'website'
     text TEXT,
     ready INTEGER NOT NULL DEFAULT 0,
     satire INTEGER NOT NULL DEFAULT 0,

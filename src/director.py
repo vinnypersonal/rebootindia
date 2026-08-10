@@ -13,6 +13,7 @@ import datetime as dt
 import time
 
 from . import config, model_router, news_gdelt, post_facebook, post_instagram, post_twitter
+from . import publish_website
 from . import reviewer as reviewer_mod
 from . import store, trend_scout, worker
 
@@ -266,6 +267,17 @@ def _post_approved_draft(conn, task, draft, dry_run=True):
     store.log(conn, task["id"], "poster", f"instagram: {detail}")
     if posted:
         store.mark_posted(conn, pid, platform_id)
+
+    # Website (T14): rebootindia.com's own record of the campaign, independent
+    # of individual social platforms' ready flags — this is additive, never a
+    # reason to fail the campaign if WEBSITE_PUBLISH_URL isn't configured.
+    payload = publish_website.build_payload(task, draft)
+    pid = store.record_post(conn, task["id"], "website", (draft.get("problem") or "")[:280],
+                             ready=True, satire=satire)
+    published, remote_id, detail = publish_website.publish(payload, dry_run=dry_run)
+    store.log(conn, task["id"], "poster", f"website: {detail}")
+    if published:
+        store.mark_posted(conn, pid, remote_id)
 
 
 def run_new_problems(conn, dry_run=True):

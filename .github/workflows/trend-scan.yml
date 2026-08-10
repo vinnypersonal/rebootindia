@@ -40,6 +40,8 @@ jobs:
           FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
           IG_USER_ID: ${{ secrets.IG_USER_ID }}
           IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+          WEBSITE_PUBLISH_URL: ${{ secrets.WEBSITE_PUBLISH_URL }}
+          WEBSITE_PUBLISH_API_KEY: ${{ secrets.WEBSITE_PUBLISH_API_KEY }}
         run: |
           if [ "${{ vars.REBOOT_LIVE_POSTING }}" = "true" ]; then
             python -m src.director --mode trend-scan

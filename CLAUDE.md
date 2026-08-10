@@ -351,7 +351,11 @@ Satire is allowed and can be effective for reach, with rules:
       Groups under `GROWTH_MIN_SAMPLE_SIZE` posted campaigns stay unweighted rather than
       being scored on noise. Read-endpoint availability on free tiers is still unconfirmed
       (§9) — every fetch degrades to "no signal" on failure instead of raising.
-- [ ] **T14** (later) Website hook: publish each approved campaign to rebootindia.com.
+- [x] **T14** Website hook: `publish_website.py` POSTs each Reviewer-approved campaign to
+      `WEBSITE_PUBLISH_URL`. The exact CMS rebootindia.com runs on wasn't specified when this
+      was built, so it targets a generic, documented JSON contract (see the module docstring
+      and README) rather than a specific platform's API shape — untested against a real
+      endpoint until the site's actual backend is confirmed.
 
 Always dry-run until CEO explicitly approves live posting. Dry-run needs no live posting
 keys — only read/verification calls if we choose to test those early.
