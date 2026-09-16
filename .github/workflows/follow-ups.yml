@@ -54,5 +54,19 @@ jobs:
           git config user.name "reboot-india-bot"
           git config user.email "actions@users.noreply.github.com"
           git add data/state.db
-          git diff --cached --quiet || git commit -m "chore: update state.db [follow-ups run]"
-          git push
+          if git diff --cached --quiet; then
+            echo "no state.db changes to commit"
+            exit 0
+          fi
+          git commit -m "chore: update state.db [follow-ups run]"
+          for attempt in 1 2 3 4 5; do
+            if git push; then
+              echo "pushed state.db on attempt $attempt"
+              exit 0
+            fi
+            echo "push rejected (attempt $attempt), fetching + rebasing onto latest main..."
+            git fetch origin main
+            git rebase origin/main -X ours || git rebase --abort || true
+            sleep $((attempt * 3))
+          done
+          echo "::warning::could not push state.db after 5 attempts (concurrent run likely) - this run's task/log data won't be reflected in the committed state.db, but the campaign work itself already completed"

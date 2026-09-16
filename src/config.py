@@ -57,7 +57,12 @@ MODEL_PROVIDERS = [
     {
         "name": "gemini",
         "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-        "model": "gemini-2.5-flash",
+        # Every call since launch (5437/5437 over 5 weeks, per state.db logs) failed with
+        # "404 Not Found" on this exact endpoint — which is otherwise live (confirmed: a bad
+        # key on this same URL returns 400 "invalid key", not 404). That signature means
+        # Google retired the pinned "gemini-2.5-flash" model id. Using the "-latest" alias
+        # instead of a version-pinned name so this can't silently go stale the same way again.
+        "model": "gemini-flash-latest",
         "api_key_env": "GEMINI_API_KEY",
     },
     {
