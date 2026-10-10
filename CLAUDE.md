@@ -155,15 +155,20 @@ four hosted providers are down, and flag any post generated this way for the CEO
 | Trending source | **Google Trends India daily RSS** — `trends.google.com/trends/trendingsearches/daily/rss?geo=IN` | ₹0 | Official free feed, no key |
 | Trending fallback | GDELT article-volume spike per tracked keyword (last 1h vs 24h avg) | ₹0 | Pure math on GDELT data already being pulled |
 | Runtime LLM | **Model Router** (§3a): Gemini Flash → Groq → Cerebras → Mistral, in order | ₹0 | Pooled free-tier headroom; no single provider is trusted alone |
-| Posting: X/Twitter | X API v2 free tier | ₹0 | **Verify current write cap at build time** — historically volatile, treat as the binding ceiling across all platforms |
+| Posting: X/Twitter | **Buffer** (flat-rate plan), not X's own API | ~$6/mo flat | X's API moved to pay-per-use with no free tier in Feb 2026 (~$0.015/post, confirmed live via a `402 credits depleted` response) — this broke Prime Directive 1, so posting routes through Buffer's GraphQL API instead, against an X channel connected in Buffer. `post_twitter.py` (direct X API) kept in the codebase, dormant. |
 | Posting: Facebook | Meta Graph API (Page token) | ₹0 | |
 | Posting: Instagram | Meta Instagram Graph API | ₹0 | One-time human setup, see v1 doc §4 — Business/Creator account + linked Page + Dev App, Development Mode (own account only) avoids App Review |
 | State store | SQLite file in repo (or JSON) | ₹0 | Committed back by the Action |
 | Secrets | GitHub Actions Secrets | ₹0 | Never commit keys |
 
-X's real free-tier posting cap is not something to assume — Claude Code should write a small
-probe/read-limits step early (T4b) and report the actual number back before the volume config
-in §7 is finalized live.
+**Flagged, per Prime Directive 1 ("flag and stop rather than silently add a paid service"):**
+X's API has had no free write tier at all since Feb 2026 — not a lowered cap, a genuinely paid
+API (~$0.015/post, no free monthly allocation). Verified live: an app with correctly configured,
+working OAuth1.0a credentials got `402 credits depleted` on its very first call. CEO decided
+(Oct 2026) to route X posting through Buffer's flat-rate plan instead of paying X per-post —
+see `src/post_buffer.py`. This is the one paid line item in an otherwise ₹0 stack; everything
+else in this table remains free.
+
 
 ---
 
@@ -187,7 +192,9 @@ rebootindia/
 │   ├─ prompt_worker.py         # the 4-persona master prompt template
 │   ├─ reviewer.py              # Pass A (deterministic) + Pass B (Gemini verify call)
 │   ├─ prompt_reviewer.py       # the verification prompt template
-│   ├─ post_twitter.py          # X API v2 posting
+│   ├─ post_twitter.py          # X API v2 posting — dormant (X has no free tier, see §4)
+│   ├─ post_buffer.py           # X posting via Buffer's GraphQL API — actually used
+│   ├─ list_buffer_channels.py  # one-off: find a Buffer channel id, not wired into any workflow
 │   ├─ post_facebook.py         # Graph API posting
 │   ├─ post_instagram.py        # Instagram Graph API (container → publish)
 │   ├─ growth.py                # (Phase 2) reads engagement, adjusts priority weights
@@ -249,9 +256,10 @@ saturation.
 
 Each campaign → up to 3 platform posts (TW/FB/IG) + up to 3 Gemini calls (1 Worker + up to 2
 Reviewer). At 40 campaigns/day that's up to 120 Gemini calls/day — comfortably inside Gemini
-Flash's free daily cap, with headroom. **X's actual free write cap (verify at T4b) is the
-real ceiling** — if it's lower than 40/day, the config cap drops to match it, campaigns don't
-silently overflow onto only 2 platforms.
+Flash's free daily cap, with headroom. **Buffer's API rate limit is the real ceiling for X
+posts** (not X's own cap, since X posting now routes through Buffer, §4) — the Essentials plan
+allows 250 requests/24h, comfortable headroom over 40/day; if a higher-volume Buffer plan isn't
+in use, the config cap should stay well under that line so campaigns don't silently fail.
 
 Trend Scout runs hourly regardless of posting cadence — checking is free and cheap; posting
 is what's rationed.
@@ -315,13 +323,13 @@ Satire is allowed and can be effective for reach, with rules:
 - [x] **T3** `store.py` — SQLite schema (tasks, logs, trends) + init + seed loader.
 - [x] **T4** `news_gdelt.py` — GDELT query + image extraction (`socialimage` + og:image
       fallback) + RSS fallback.
-- [ ] **T4b** Probe X API's actual current free-tier write cap; write the number into
+- [x] **T4b** Probe X API's actual current free-tier write cap; write the number into
       `config.py` as the binding daily ceiling; report it back before going live.
-      *(tooling built — `src/probe_x_limits.py`, posts+immediately-deletes one throwaway
-      tweet and reads back the rate-limit headers, gated behind an explicit `--yes` flag
-      since it's a real (if brief) write to the account. Not yet run — no X credentials
-      available in the build environment. `DAILY_CAMPAIGN_CAP` still defaults to 40,
-      unverified against X's real cap; a human with live creds needs to run it, per README.)*
+      *(Moot: ran `src/probe_x_limits.py` with live, correctly-configured credentials (Oct
+      2026) and got `402 credits depleted` — X has had no free write tier at all since Feb
+      2026, not just a lowered cap. CEO decided to route X posting through Buffer instead of
+      X's own API (§4) — the probe tool and `post_twitter.py` stay in the codebase, dormant,
+      in case X reintroduces free access for public-interest apps.)*
 - [x] **T5** `trend_scout.py` — Google Trends India RSS + GDELT volume-spike scorer; inserts
       deduped HIGH-priority tasks. *(Trends RSS URL above had moved to `/trending/rss` —
       fixed and verified live during the build; the old `/trends/trendingsearches/daily/rss`
@@ -366,7 +374,8 @@ keys — only read/verification calls if we choose to test those early.
 
 1. Public repo confirmed? (needed for free unlimited Actions minutes) — repo is currently
    empty/new; confirm visibility (public/private) before T1.
-2. Daily campaign ceiling: default 40, pending T4b's real X cap — confirm or override.
+2. Daily campaign ceiling: default 40, now bounded by Buffer's API rate limit (250/24h on
+   Essentials) rather than X's own cap — confirm or override.
 3. Satire ratio cap: default 20% — confirm or override.
 4. Priority city/district pool (~50–100): who picks the list, or should Claude Code seed it
    from population/news-volume data?
