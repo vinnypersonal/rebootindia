@@ -12,7 +12,7 @@ import argparse
 import datetime as dt
 import time
 
-from . import config, model_router, news_gdelt, post_facebook, post_instagram, post_twitter
+from . import config, model_router, news_gdelt, post_buffer, post_facebook, post_instagram
 from . import publish_website
 from . import reviewer as reviewer_mod
 from . import store, trend_scout, worker
@@ -242,8 +242,12 @@ def _post_approved_draft(conn, task, draft, dry_run=True):
     tw = draft.get("twitter", {})
     if tw.get("ready", True) and tw.get("text"):
         pid = store.record_post(conn, task["id"], "twitter", tw["text"], ready=True, satire=satire)
-        posted, platform_id, detail = post_twitter.post(tw["text"], dry_run=dry_run)
-        store.log(conn, task["id"], "poster", f"twitter: {detail}")
+        # Via Buffer, not X's own API directly — X's API moved to pay-per-use
+        # pricing with no free tier in Feb 2026, which breaks Prime Directive 1
+        # (zero variable cost). post_twitter.py (direct X API) stays in the
+        # codebase, dormant, in case that's ever revisited.
+        posted, platform_id, detail = post_buffer.post(tw["text"], dry_run=dry_run)
+        store.log(conn, task["id"], "poster", f"twitter (via buffer): {detail}")
         if posted:
             store.mark_posted(conn, pid, platform_id)
 

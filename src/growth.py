@@ -15,13 +15,16 @@ Free-tier *read* availability is not guaranteed just because posting is free
 "no signal this run" on any failure rather than raising, so a provider
 outage or a locked-down read tier never crashes the growth-review cron.
 """
-from . import config, post_facebook, post_instagram, post_twitter, store
+from . import config, post_buffer, post_facebook, post_instagram, store
 
 # Module references, not bound functions — .fetch_metrics is looked up at
 # call time so tests (and any future hot-patching) can mock
-# post_twitter.fetch_metrics etc. after this module has already been imported.
+# post_buffer.fetch_metrics etc. after this module has already been imported.
+# "twitter" posts via post_buffer.py since X's own API moved to pay-per-use
+# pricing (Feb 2026) — the platform_post_id stored for twitter posts is now
+# a Buffer post id, not an X tweet id, so metrics must come from Buffer too.
 _FETCHER_MODULES = {
-    "twitter": post_twitter,
+    "twitter": post_buffer,
     "facebook": post_facebook,
     "instagram": post_instagram,
 }

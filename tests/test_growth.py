@@ -52,7 +52,7 @@ class CollectEngagementTests(unittest.TestCase):
             bad_post = store.record_post(conn, task_id, "facebook", "text", ready=True)
             store.mark_posted(conn, bad_post, "fb123")
 
-            with patch("src.post_twitter.fetch_metrics", return_value={"likes": 5, "shares": 1, "comments": 2}), \
+            with patch("src.post_buffer.fetch_metrics", return_value={"likes": 5, "shares": 1, "comments": 2}), \
                  patch("src.post_facebook.fetch_metrics", return_value=None):
                 fetched = growth.collect_engagement(conn)
 

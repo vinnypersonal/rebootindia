@@ -19,7 +19,7 @@ Worker — 1 Model Router call, 4 personas (Researcher, Fact-Checker, Strategist
 Reviewer — Pass A (deterministic checks) + Pass B (2nd Model Router call, fact-support verify)
         │ (bounce → 1 retry via Worker → re-review; still failing → drop that platform)
         ▼
-Poster — X / Facebook / Instagram (only platforms marked ready=true)
+Poster — Buffer (X) / Facebook / Instagram (only platforms marked ready=true)
         │
         ▼
 Logger + SQLite state (data/state.db, committed by the Action)
@@ -46,11 +46,41 @@ python -m src.director --mode trend-scan --dry-run   # safe: no posting keys req
 full generate-and-review pipeline but never calls a posting API — this is the default until
 the CEO explicitly flips it live.
 
-## T4b: confirming X's real free-tier write cap
+## X posting goes through Buffer, not X's own API
 
-X has no read-only "how many posts do I have left" endpoint — the only reliable signal is the
-rate-limit headers X returns on an actual write call. `src/probe_x_limits.py` posts one
-short, obviously-a-probe tweet, reads those headers back, and deletes the tweet immediately.
+X moved its entire developer API to pay-per-use pricing in Feb 2026 — no free tier, ~$0.015
+per post created, no free monthly allocation (confirmed live: a correctly-authenticated test
+post returned `402 credits depleted`). That breaks Prime Directive 1 (zero variable cost), so
+`src/post_twitter.py` (direct X API) is kept in the codebase but **dormant** — `director.py`
+posts to X via `src/post_buffer.py` instead, which calls
+[Buffer's GraphQL API](https://developers.buffer.com) against an X channel already connected
+in your Buffer account. Buffer's flat-rate plan doesn't meter per-post the way X's own API now
+does.
+
+Setup:
+1. Connect your X account to Buffer yourself (buffer.com — human step, same category as the
+   X/Meta app approvals below).
+2. Generate a Buffer API key at <https://publish.buffer.com/settings/api>.
+3. Find your X channel's Buffer id:
+   ```bash
+   BUFFER_API_KEY=... python -m src.list_buffer_channels
+   ```
+4. Add `BUFFER_API_KEY` and `BUFFER_X_CHANNEL_ID` as GitHub Actions secrets.
+
+Buffer's API has no "publish right now" mode — `post_buffer.py` uses `customScheduled` with
+`dueAt` ~10 seconds in the future, as close to immediate as it supports. Engagement read-back
+(T13's `growth.py`) also goes through Buffer's own `post.metrics` query for twitter posts now,
+since the post id stored is a Buffer id, not an X tweet id — see `post_buffer.fetch_metrics`.
+
+## T4b: confirming X's real free-tier write cap (moot unless direct X API is reconsidered)
+
+This tooling predates the discovery that X has no free write tier at all — kept for reference
+in case the direct-API path (`post_twitter.py`) is ever revisited, e.g. if X reintroduces free
+access for public-interest apps. X has no read-only "how many posts do I have left" endpoint —
+the only reliable signal is the rate-limit headers X returns on an actual write call.
+`src/probe_x_limits.py` posts one short, obviously-a-probe tweet, reads those headers back,
+and deletes the tweet immediately — but expect a `402 credits depleted` rather than useful
+rate-limit data unless the X Developer account has been funded.
 
 This is a real (if brief) write to the connected account, so it's a human-run, opt-in step —
 not part of any workflow, and not something Claude Code runs on its own:
@@ -58,10 +88,6 @@ not part of any workflow, and not something Claude Code runs on its own:
 ```bash
 python -m src.probe_x_limits --yes   # requires live X_API_KEY/SECRET/ACCESS_TOKEN/SECRET
 ```
-
-It prints the `x-app-limit-*`/`x-user-limit-*` headers X returns and reminds you to lower
-`REBOOT_DAILY_CAMPAIGN_CAP` (repo secret/variable) if the real cap is under the current
-default of 40. Re-run periodically — these free-tier numbers move without notice (§3a).
 
 ## Required GitHub Actions Secrets (only needed for live posting / live LLM calls)
 
@@ -71,7 +97,8 @@ default of 40. Re-run periodically — these free-tier numbers move without noti
 | `GROQ_API_KEY` | Model Router priority 2 |
 | `CEREBRAS_API_KEY` | Model Router priority 3 |
 | `MISTRAL_API_KEY` | Model Router priority 4 |
-| `X_API_KEY`, `X_API_SECRET`, `X_ACCESS_TOKEN`, `X_ACCESS_SECRET` | X/Twitter posting (OAuth1.0a user context) |
+| `BUFFER_API_KEY`, `BUFFER_X_CHANNEL_ID` | X/Twitter posting, via Buffer (see above) |
+| `X_API_KEY`, `X_API_SECRET`, `X_ACCESS_TOKEN`, `X_ACCESS_SECRET` | not used by the live posting path — only `src/probe_x_limits.py` (dormant `post_twitter.py`, direct X API) |
 | `FB_PAGE_ID`, `FB_PAGE_ACCESS_TOKEN` | Facebook Page posting |
 | `IG_USER_ID`, `IG_ACCESS_TOKEN` | Instagram posting (Business/Creator account linked to the Page) |
 | `WEBSITE_PUBLISH_URL` | T14: rebootindia.com publish endpoint (see below) |
@@ -97,27 +124,28 @@ website publish step is skipped and logged, never a reason to fail the campaign.
 
 Built (T1–T14): repo scaffold, config/domains/cities/handles, SQLite store, GDELT + Google
 News RSS discovery, Google Trends + GDELT-spike Trend Scout, Model Router (Gemini → Groq →
-Cerebras → Mistral failover), 4-persona Worker, 2-pass Reviewer, X/Facebook/Instagram
+Cerebras → Mistral failover), 4-persona Worker, 2-pass Reviewer, Buffer (X)/Facebook/Instagram
 posters, Director orchestration with `--dry-run`, follow-up flow that re-fetches fresh news
 and re-runs the full pipeline with the original post attached as context (a status check, not
 a repeat report), the Growth Tracker (reads back likes/shares/comments and turns them into
 domain/city weight multipliers that nudge future selection order/frequency — never a gate:
 national cadence stays guaranteed and every city still cycles through rotation regardless of
 weight), the website publish hook (a generic, documented REST contract — see above), the 5
-GitHub Actions workflows (4 crons + a `tests.yml` CI check), and a unit test suite (53 tests,
+GitHub Actions workflows (4 crons + a `tests.yml` CI check), and a unit test suite (67 tests,
 `python -m unittest discover -s tests`).
 
 Not yet built, on purpose:
-- **T4b** — tooling exists (`src/probe_x_limits.py`), but it hasn't actually been run: X's
-  real free-tier write cap is still unconfirmed (no X credentials in this environment).
-  `config.DAILY_CAMPAIGN_CAP` defaults to 40 per the doc; **re-verify against X's real cap
-  before going live** and lower the config value to match if needed.
+- **T4b** is moot for the live pipeline — X's own API has no free tier at all (see above), so
+  its write cap no longer matters; `src/probe_x_limits.py` is kept only in case the direct-API
+  path is ever revisited.
 - **T14**'s publish hook is code-complete but untested against a real endpoint — nobody has
   confirmed what rebootindia.com's backend actually is yet (see the T14 section above).
 
-Also unconfirmed: whether X/Meta's free tiers actually allow reading back engagement metrics
+Also unconfirmed: whether Meta's free tier actually allows reading back engagement metrics
 (§9 flags this explicitly) — `growth.py`'s fetchers degrade to "no signal" on any failure, so
 a locked-down read tier just means weights stay at the neutral default (1.0), not a crash.
+Buffer's own metrics (used for twitter posts now) are confirmed documented but refresh only
+about once a day, so a just-posted campaign legitimately shows no engagement yet.
 
 ## Decisions still pending CEO sign-off (`CLAUDE.md` §12)
 
